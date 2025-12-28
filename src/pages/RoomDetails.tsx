@@ -1,18 +1,17 @@
 import { useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
-import { useQuery } from '@tanstack/react-query';
-import { format, differenceInDays, addDays } from 'date-fns';
-import { Calendar as CalendarIcon, Users, Maximize, Check, Loader2 } from 'lucide-react';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { format, differenceInDays } from 'date-fns';
+import { Users, Maximize, Check, Loader2, CalendarDays } from 'lucide-react';
 import { Layout } from '@/components/layout/Layout';
 import { Button } from '@/components/ui/button';
-import { Calendar } from '@/components/ui/calendar';
-import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Textarea } from '@/components/ui/textarea';
 import { useToast } from '@/hooks/use-toast';
 import { useAuth } from '@/hooks/useAuth';
 import { supabase } from '@/integrations/supabase/client';
 import { Room } from '@/types/database';
+import { AvailabilityCalendar } from '@/components/rooms/AvailabilityCalendar';
 
 const roomTypeLabels: Record<string, string> = {
   standard: 'Standard Room',
@@ -26,6 +25,7 @@ export default function RoomDetails() {
   const navigate = useNavigate();
   const { user } = useAuth();
   const { toast } = useToast();
+  const queryClient = useQueryClient();
 
   const [checkIn, setCheckIn] = useState<Date>();
   const [checkOut, setCheckOut] = useState<Date>();
@@ -49,6 +49,11 @@ export default function RoomDetails() {
 
   const nights = checkIn && checkOut ? differenceInDays(checkOut, checkIn) : 0;
   const totalPrice = room ? nights * room.price_per_night : 0;
+
+  const handleDateSelect = (newCheckIn: Date | undefined, newCheckOut: Date | undefined) => {
+    setCheckIn(newCheckIn);
+    setCheckOut(newCheckOut);
+  };
 
   const handleBooking = async () => {
     if (!user) {
@@ -92,6 +97,9 @@ export default function RoomDetails() {
         description: error.message,
       });
     } else {
+      // Invalidate the room bookings query to refresh availability
+      queryClient.invalidateQueries({ queryKey: ['room-bookings', id] });
+      
       toast({
         title: "Booking confirmed!",
         description: "Your room has been booked successfully.",
@@ -132,9 +140,9 @@ export default function RoomDetails() {
         <div className="container mx-auto px-4">
           <div className="grid lg:grid-cols-3 gap-8">
             {/* Room Details */}
-            <div className="lg:col-span-2">
+            <div className="lg:col-span-2 space-y-8">
               {/* Main Image */}
-              <div className="relative h-96 rounded-lg overflow-hidden mb-8">
+              <div className="relative h-96 rounded-lg overflow-hidden">
                 <img
                   src={room.image_url || '/placeholder.svg'}
                   alt={room.name}
@@ -143,7 +151,7 @@ export default function RoomDetails() {
               </div>
 
               {/* Room Info */}
-              <div className="mb-8">
+              <div>
                 <p className="text-accent font-medium tracking-widest mb-2 uppercase">
                   {roomTypeLabels[room.room_type]}
                 </p>
@@ -179,6 +187,23 @@ export default function RoomDetails() {
                   </div>
                 </div>
               )}
+
+              {/* Availability Calendar */}
+              <div className="bg-card rounded-lg shadow-md p-6 border border-border">
+                <div className="flex items-center gap-2 mb-6">
+                  <CalendarDays className="h-6 w-6 text-accent" />
+                  <h2 className="text-2xl font-serif font-bold">Check Availability</h2>
+                </div>
+                <p className="text-muted-foreground mb-6">
+                  Select your check-in and check-out dates. Dates marked in red are already booked.
+                </p>
+                <AvailabilityCalendar
+                  roomId={id!}
+                  onSelectDates={handleDateSelect}
+                  selectedCheckIn={checkIn}
+                  selectedCheckOut={checkOut}
+                />
+              </div>
             </div>
 
             {/* Booking Card */}
@@ -191,49 +216,21 @@ export default function RoomDetails() {
                   <span className="text-muted-foreground"> / night</span>
                 </div>
 
+                {/* Selected Dates Display */}
                 <div className="space-y-4 mb-6">
-                  {/* Check-in */}
-                  <div>
-                    <label className="block text-sm font-medium mb-2">Check-in</label>
-                    <Popover>
-                      <PopoverTrigger asChild>
-                        <Button variant="outline" className="w-full justify-start">
-                          <CalendarIcon className="mr-2 h-4 w-4" />
-                          {checkIn ? format(checkIn, 'PPP') : 'Select date'}
-                        </Button>
-                      </PopoverTrigger>
-                      <PopoverContent className="w-auto p-0">
-                        <Calendar
-                          mode="single"
-                          selected={checkIn}
-                          onSelect={setCheckIn}
-                          disabled={(date) => date < new Date()}
-                          initialFocus
-                        />
-                      </PopoverContent>
-                    </Popover>
-                  </div>
-
-                  {/* Check-out */}
-                  <div>
-                    <label className="block text-sm font-medium mb-2">Check-out</label>
-                    <Popover>
-                      <PopoverTrigger asChild>
-                        <Button variant="outline" className="w-full justify-start">
-                          <CalendarIcon className="mr-2 h-4 w-4" />
-                          {checkOut ? format(checkOut, 'PPP') : 'Select date'}
-                        </Button>
-                      </PopoverTrigger>
-                      <PopoverContent className="w-auto p-0">
-                        <Calendar
-                          mode="single"
-                          selected={checkOut}
-                          onSelect={setCheckOut}
-                          disabled={(date) => date < (checkIn ? addDays(checkIn, 1) : new Date())}
-                          initialFocus
-                        />
-                      </PopoverContent>
-                    </Popover>
+                  <div className="grid grid-cols-2 gap-4">
+                    <div className="bg-muted/50 rounded-lg p-4">
+                      <p className="text-xs text-muted-foreground uppercase tracking-wide mb-1">Check-in</p>
+                      <p className="font-semibold">
+                        {checkIn ? format(checkIn, 'MMM d, yyyy') : 'Select date'}
+                      </p>
+                    </div>
+                    <div className="bg-muted/50 rounded-lg p-4">
+                      <p className="text-xs text-muted-foreground uppercase tracking-wide mb-1">Check-out</p>
+                      <p className="font-semibold">
+                        {checkOut ? format(checkOut, 'MMM d, yyyy') : 'Select date'}
+                      </p>
+                    </div>
                   </div>
 
                   {/* Guests */}
@@ -291,7 +288,7 @@ export default function RoomDetails() {
                   {isBooking ? (
                     <Loader2 className="h-4 w-4 animate-spin" />
                   ) : room.is_available ? (
-                    'Book Now'
+                    nights > 0 ? 'Confirm Booking' : 'Select Dates'
                   ) : (
                     'Unavailable'
                   )}
@@ -300,6 +297,12 @@ export default function RoomDetails() {
                 {!user && (
                   <p className="text-center text-muted-foreground text-sm mt-4">
                     Please sign in to make a booking
+                  </p>
+                )}
+
+                {nights < 1 && checkIn && !checkOut && (
+                  <p className="text-center text-accent text-sm mt-4">
+                    Now select your check-out date from the calendar
                   </p>
                 )}
               </div>
